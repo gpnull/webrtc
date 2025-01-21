@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC Session</title>
+    <style>
+        textarea {
+            width: 500px;
+            min-height: 35px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="senderSignalingContainer">
+        <b><u>Sender:</u></b> Browser SDP<br />
+        <textarea id="senderLocalSessionDescription" readonly="true"></textarea> <br />
+
+        <b><u>Sender:</u></b> Pion SDP<br />
+        <textarea id="remoteSessionDescriptionSender"></textarea> <br />
+
+        <button onclick="window.copySDPSender(true)">start</button><br /><br />
+    </div>
+
+    <b>=======================================================</b>
+    <br />
+    <br />
+
+    <div id="recieverSignalingContainer">
+        <b><u>Reciever:</u></b> Browser SDP<br />
+        <textarea id="recieverLocalSessionDescription" readonly="true"></textarea> <br />
+
+        <b><u>Reciever:</u></b> Pion SDP<br />
+        <textarea id="remoteSessionDescriptionReciever"></textarea> <br />
+
+        <button onclick="window.copySDPReciever(false)">view</button><br /><br />
+    </div>
+    <br />
+
+    Video Camera<br />
+    <video id="video1" width="160" height="120" autoplay muted></video> <br />
+    Video<br />
+    <video id="video2" width="160" height="120" autoplay muted></video> <br />
+
+    <br />
+
+    <!-- Logs<br /> -->
+    <div id="logs" style="display: none"></div>
+
+    <script>
+        var log = (msg) => {
+            document.getElementById("logs").innerHTML += msg + "<br>";
+        };
+
+        // WebSocket connection
+        var socket = new WebSocket("ws://localhost:8080/ws");
+        socket.onopen = () => {
+            console.log("WebSocket connection established");
+        };
+        socket.onerror = (error) => {
+            console.log("WebSocket error: " + error);
+        };
+
+        socket.onmessage = (event) => {
+            console.log(JSON.parse(event.data));
+            try {
+                const message = JSON.parse(event.data);
+
+                if (message.type === "sdp-answer-sender") {
+                    console.log("sdp-answer-sender");
+                    document.getElementById("remoteSessionDescriptionSender").value = message.data;
+
+                    const senderSDPValue = document.getElementById("remoteSessionDescriptionSender").value;
+                    if (senderSDPValue) {
+                        window.startSessionSender();
+                    }
+                }
+
+                if (message.type === "sdp-answer-reciever") {
+                    console.log("sdp-answer-reciever");
+                    document.getElementById("remoteSessionDescriptionReciever").value = message.data;
+
+                    const recieverSDPValue = document.getElementById("remoteSessionDescriptionReciever").value;
+                    if (recieverSDPValue) {
+                        window.startSessionReciever();
+                    }
+                }
+            } catch (e) {
+                log("Error parsing WebSocket message: " + e);
+            }
+        };
+
+
+        window.createSession = (isPublisher) => {
+            let pcSender = new RTCPeerConnection({
+                iceServers: [
+                    {
+                        urls: "stun:stun.l.google.com:19302",
+                    },
+                ],
+            });
+            pcSender.oniceconnectionstatechange = (e) => {
+                console.log("sender:", pcSender.iceConnectionState);
+            };
+            pcSender.onicecandidate = (event) => {
+                if (event.candidate === null) {
+                    document.getElementById("senderLocalSessionDescription").value = btoa(
+                        JSON.stringify(pcSender.localDescription)
+                    );
+                }
+            };
+
+            let pcReciever = new RTCPeerConnection({
+                iceServers: [
+                    {
+                        urls: "stun:stun.l.google.com:19302",
+                    },
+                ],
+            });
+            pcReciever.oniceconnectionstatechange = (e) => {
+                console.log("reciever:", pcReciever.iceConnectionState);
+            };
+            pcReciever.onicecandidate = (event) => {
+                if (event.candidate === null) {
+                    document.getElementById("recieverLocalSessionDescription").value = btoa(
+                        JSON.stringify(pcReciever.localDescription)
+                    );
+                }
+            };
+
+            {
+                navigator.mediaDevices
+                    .getUserMedia({ video: true, audio: false })
+                    .then((stream) => {
+                        stream.getTracks().forEach((track) => pcSender.addTrack(track, stream));
+                        document.getElementById("video1").srcObject = stream;
+                        pcSender.createOffer()
+                            .then((d) => pcSender.setLocalDescription(d))
+                            .catch(log);
+                    })
+                    .catch(log);
+            }
+            {
+                pcReciever.addTransceiver("video");
+                pcReciever.createOffer()
+                    .then((d) => pcReciever.setLocalDescription(d))
+                    .catch(log);
+
+                pcReciever.ontrack = function (event) {
+                    var el = document.getElementById("video2");
+                    el.srcObject = event.streams[0];
+                    el.autoplay = true;
+                    el.controls = true;
+                };
+            }
+
+
+
+            window.startSessionSender = () => {
+                let sd = document.getElementById("remoteSessionDescriptionSender").value;
+                if (sd === "") {
+                    return log("Session Description must not be empty");
+                }
+
+                try {
+                    pcSender.setRemoteDescription(JSON.parse(atob(sd)));
+                } catch (e) {
+                    log(e);
+                }
+            };
+
+            window.startSessionReciever = () => {
+                let sd = document.getElementById("remoteSessionDescriptionReciever").value;
+                if (sd === "") {
+                    return log("Session Description must not be empty");
+                }
+
+                try {
+                    pcReciever.setRemoteDescription(JSON.parse(atob(sd)));
+                } catch (e) {
+                    log(e);
+                }
+            };
+
+            window.copySDPSender = () => {
+                const browserSDP = document.getElementById("senderLocalSessionDescription");
+
+                let senderSDPOffer = {
+                    type: "sender-sdp-offer",
+                    data: browserSDP.value
+                };
+                socket.send(JSON.stringify(senderSDPOffer));
+
+                browserSDP.focus();
+                browserSDP.select();
+
+                try {
+                    const successful = document.execCommand("copy");
+                    const msg = successful ? "successful" : "unsuccessful";
+                    log("Copying SDP was " + msg);
+                } catch (err) {
+                    log("Unable to copy SDP " + err);
+                }
+            };
+
+            window.copySDPReciever = () => {
+                const browserSDP = document.getElementById("recieverLocalSessionDescription");
+                let recieverSDPOffer = {
+                    type: "reciever-sdp-offer",
+                    data: browserSDP.value
+                };
+                socket.send(JSON.stringify(recieverSDPOffer));
+
+                browserSDP.focus();
+                browserSDP.select();
+
+                try {
+                    const successful = document.execCommand("copy");
+                    const msg = successful ? "successful" : "unsuccessful";
+                    log("Copying SDP was " + msg);
+                } catch (err) {
+                    log("Unable to copy SDP " + err);
+                }
+            };
+        };
+
+        window.onload = () => {
+            window.createSession(true);
+        };
+    </script>
+</body>
+
+</html>
