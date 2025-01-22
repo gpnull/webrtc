@@ -14,15 +14,17 @@
 </head>
 
 <body>
-  <h3>Browser base64 Session Description</h3>
+  <h3>Browser SDP:</h3>
   <textarea id="localSessionDescription" readonly="true"></textarea> <br />
-  <button onclick="window.copySDP()">Copy browser SDP to clipboard</button>
+  <!-- <button onclick="window.copySDP()">Copy browser SDP to clipboard</button> -->
+  <!-- <br /><br /> -->
+
+  <h3>Pion SDP:</h3>
+  <textarea id="remoteSessionDescription"></textarea> <br />
+  <!-- <button onclick="window.startSession()">Start Session</button> -->
   <br /><br />
 
-  <h3>Golang base64 Session Description</h3>
-  <textarea id="remoteSessionDescription"></textarea> <br />
-  <button onclick="window.startSession()">Start Session</button>
-  <br /><br />
+  <button onclick="window.copySDP()">Start Demo</button>
 
   <h3>Video</h3>
   <div id="remoteVideos"></div>
@@ -41,17 +43,6 @@
     socket.onopen = () => {
       console.log("WebSocket connection established");
     };
-    socket.onmessage = (event) => {
-      console.log("Message received from server: " + event.data);
-      try {
-        const message = JSON.parse(event.data);
-        if (message.type === "sdp-answer") {
-          document.getElementById("remoteSessionDescription").value = message.data;
-        }
-      } catch (error) {
-        console.log("Error parsing message: " + error);
-      }
-    };
     socket.onerror = (error) => {
       console.log("WebSocket error: " + error);
     };
@@ -62,6 +53,23 @@
         console.log("Connection closed unexpectedly");
       }
     };
+
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === "sdp-answer") {
+          console.log("Received SDP Answer from server:", message);
+          document.getElementById("remoteSessionDescription").value = message.data;
+
+          if (document.getElementById("remoteSessionDescription").value != ""){
+            window.startSession();
+          }
+        }
+      } catch (error) {
+        console.log("Error parsing message: " + error);
+      }
+    };
+
 
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],

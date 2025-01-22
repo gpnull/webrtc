@@ -18,13 +18,14 @@ var upgrader = websocket.Upgrader{
 		return true
 	},
 }
+var wsConn *websocket.Conn
 
 func main() {
 	port := flag.Int("port", 8080, "http server port")
 	flag.Parse()
 
 	// Setup WebSocket server
-	sdpChan := make(chan string) 
+	sdpChan := make(chan string)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		handleSDPWebSocket(w, r, sdpChan)
 	})
@@ -149,7 +150,16 @@ func main() {
 	<-gatherComplete
 
 	// Output the answer in base64 so we can paste it in browser
-	fmt.Println(encode(peerConnection.LocalDescription()))
+	// fmt.Println(encode(peerConnection.LocalDescription()))
+	// Send SDP to WebSocket client with type "sdp-answer"
+	if wsConn != nil {
+		sdpAnswer := encode(peerConnection.LocalDescription())
+		message := map[string]interface{}{
+			"type": "sdp-answer",
+			"data": sdpAnswer,
+		}
+		wsConn.WriteJSON(message)
+	}
 
 	// Block forever
 	select {}
@@ -186,6 +196,9 @@ func handleSDPWebSocket(w http.ResponseWriter, r *http.Request, sdpChan chan str
 		return
 	}
 	defer conn.Close()
+
+	// Store the connection in the global variable
+	wsConn = conn
 
 	for {
 		// Read message from client
