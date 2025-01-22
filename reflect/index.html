@@ -37,6 +37,31 @@
     };
 
     const socket = new WebSocket("ws://localhost:8080/ws");
+    // WebSocket event listeners
+    socket.onopen = () => {
+      console.log("WebSocket connection established");
+    };
+    socket.onmessage = (event) => {
+      console.log("Message received from server: " + event.data);
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === "sdp-answer") {
+          document.getElementById("remoteSessionDescription").value = message.data;
+        }
+      } catch (error) {
+        console.log("Error parsing message: " + error);
+      }
+    };
+    socket.onerror = (error) => {
+      console.log("WebSocket error: " + error);
+    };
+    socket.onclose = (event) => {
+      if (event.wasClean) {
+        console.log("Closed cleanly, code=" + event.code + ", reason=" + event.reason);
+      } else {
+        console.log("Connection closed unexpectedly");
+      }
+    };
 
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],

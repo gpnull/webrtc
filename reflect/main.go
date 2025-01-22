@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/gorilla/websocket"
-	"io"
 	"net/http"
 	"os"
 	"strconv"
+
+	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -23,10 +23,18 @@ func main() {
 	port := flag.Int("port", 8080, "http server port")
 	flag.Parse()
 
-	sdpChan := httpSDPServer(*port)
-
 	// Setup WebSocket server
-	http.HandleFunc("/ws", handleWebSocket)
+	sdpChan := make(chan string) 
+	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		handleSDPWebSocket(w, r, sdpChan)
+	})
+
+	// Start HTTP server for WebSocket connections
+	go func() {
+		if err := http.ListenAndServe(":"+strconv.Itoa(*port), nil); err != nil {
+			panic(err)
+		}
+	}()
 
 	offer := webrtc.SessionDescription{}
 	decode(<-sdpChan, &offer)
@@ -170,7 +178,7 @@ func decode(in string, obj *webrtc.SessionDescription) {
 }
 
 // HTTP server to handle WebSocket connection
-func handleWebSocket(w http.ResponseWriter, r *http.Request) {
+func handleSDPWebSocket(w http.ResponseWriter, r *http.Request, sdpChan chan string) {
 	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -202,24 +210,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			// If the message type is "sdp-offer", print the data (SDP)
 			if wsMessage.Type == "sdp-offer" {
-				fmt.Println("Received SDP offer from browser:", wsMessage.Data)
+				// fmt.Println("Received SDP offer from browser:", wsMessage.Data)
+
+				// Send the SDP offer data to the sdpChan
+				sdpChan <- wsMessage.Data
 			}
 		}
 	}
-}
-
-// HTTP server to handle the SDP offer from the browser
-func httpSDPServer(port int) chan string {
-	sdpChan := make(chan string)
-	http.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
-		body, _ := io.ReadAll(req.Body)
-		fmt.Fprintf(res, "done")
-		sdpChan <- string(body)
-	})
-
-	go func() {
-		panic(http.ListenAndServe(":"+strconv.Itoa(port), nil))
-	}()
-
-	return sdpChan
 }
