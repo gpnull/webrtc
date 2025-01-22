@@ -5,19 +5,28 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/gorilla/websocket"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
-
 	"github.com/pion/webrtc/v4"
 )
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
 
 func main() {
 	port := flag.Int("port", 8080, "http server port")
 	flag.Parse()
 
 	sdpChan := httpSDPServer(*port)
+
+	// Setup WebSocket server
+	http.HandleFunc("/ws", handleWebSocket)
 
 	offer := webrtc.SessionDescription{}
 	decode(<-sdpChan, &offer)
@@ -160,6 +169,46 @@ func decode(in string, obj *webrtc.SessionDescription) {
 	}
 }
 
+// HTTP server to handle WebSocket connection
+func handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	// Upgrade HTTP connection to WebSocket
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		fmt.Println("Failed to upgrade WebSocket:", err)
+		return
+	}
+	defer conn.Close()
+
+	for {
+		// Read message from client
+		msgType, msg, err := conn.ReadMessage()
+		if err != nil {
+			fmt.Println("Error reading message:", err)
+			break
+		}
+
+		if msgType == websocket.TextMessage {
+			// Create an object to hold the received message
+			var wsMessage struct {
+				Type string `json:"type"`
+				Data string `json:"data"`
+			}
+
+			// Parse the received message (which is expected to be JSON)
+			if err := json.Unmarshal(msg, &wsMessage); err != nil {
+				fmt.Println("Failed to parse WebSocket message:", err)
+				continue
+			}
+
+			// If the message type is "sdp-offer", print the data (SDP)
+			if wsMessage.Type == "sdp-offer" {
+				fmt.Println("Received SDP offer from browser:", wsMessage.Data)
+			}
+		}
+	}
+}
+
+// HTTP server to handle the SDP offer from the browser
 func httpSDPServer(port int) chan string {
 	sdpChan := make(chan string)
 	http.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
